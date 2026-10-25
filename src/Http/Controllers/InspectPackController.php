@@ -5,13 +5,18 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Validation\ValidationException;
+use MrpackManager\Services\JavaCompatibilityResolver;
 use Pterodactyl\Models\Server;
 use ZipArchive;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class InspectPackController extends Controller
 {
-    public function inspect(Request $request, Server $server): JsonResponse
+    public function inspect(
+        Request $request,
+        Server $server,
+        JavaCompatibilityResolver $compatibility,
+    ): JsonResponse
     {
         $request->validate([
             'pack' => ['required', 'file', 'max:2097152'],
@@ -96,6 +101,9 @@ class InspectPackController extends Controller
                 }
             }
 
+            $server->loadMissing('egg');
+            $availableImages = $server->egg?->docker_images ?? [];
+
             return response()->json([
                 'name' => is_string($index['name'] ?? null) ? $index['name'] : 'Unnamed pack',
                 'versionId' => is_string($index['versionId'] ?? null) ? $index['versionId'] : null,
@@ -104,6 +112,13 @@ class InspectPackController extends Controller
                     ? $dependencies['minecraft']
                     : null,
                 'loaders' => $loaders,
+                'javaCompatibility' => $compatibility->resolve(
+                    is_string($dependencies['minecraft'] ?? null)
+                        ? $dependencies['minecraft']
+                        : null,
+                    $loaders,
+                    $availableImages,
+                ),
                 'fileCount' => count($files),
                 'overrides' => $overrides,
             ]);

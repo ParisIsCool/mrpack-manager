@@ -64,6 +64,20 @@ prefix is not the declared one. The SDK theme maps the same live tokens as core,
 colors. Pass `prefix: 'mm'` to the SDK test hosts when a test asserts merged classes.
 CSS loads before extension setup.
 
+## Java compatibility inspection
+
+Pack inspection reads `modrinth.index.json` and reports the Minecraft server
+Java recommendation separately from the Java runtime required by the uploaded
+`mrpack4server` launcher. The current `mrpack4server-0.5.1` is downloaded using the release's runtime-specific
+asset: `jvm8` for server Java 8+, `jvm16` for server Java 16+, or `jvm17`
+for server Java 17+. The selected launcher is uploaded as `server.jar`.
+
+The server policy covers Java 8 for Minecraft 1.7 through 1.16, Java 16 for
+1.17, Java 17 for 1.18 through 1.20.4, and Java 21 for 1.20.5 through 1.21.
+Docker images are recommended only when the current egg offers the matching
+verified Pterodactyl yolks image. Inspection never changes the server image or
+executes the launcher.
+
 Run `php artisan p:extension:types /path/to/mrpack-manager` to generate literal screen ids and
 configuration keys after loading the provider. Declare frontend settings with
 `->frontend()->frontendType('string')` and add `->public()` to those guests may read; use

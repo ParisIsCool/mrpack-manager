@@ -17,10 +17,17 @@ class InstallPackController extends Controller
     private const RELEASE_API =
         'https://api.github.com/repos/Patbox/mrpack4server/releases/tags/0.5.1';
 
-    public function launcher(): StreamedResponse|JsonResponse
+    public function launcher(Request $request): StreamedResponse|JsonResponse
     {
+        $java = $request->integer('java', 8);
+        $variant = match (true) {
+            $java >= 17 => 'jvm17',
+            $java >= 16 => 'jvm16',
+            default => 'jvm8',
+        };
+        $filename = 'mrpack4server-' . self::VERSION . '-' . $variant . '.jar';
         $directory = storage_path('app/mrpack-manager');
-        $path = $directory . '/mrpack4server-' . self::VERSION . '.jar';
+        $path = $directory . '/' . $filename;
 
         if (!is_file($path) || filesize($path) < 100_000) {
             $release = Http::timeout(20)
@@ -43,7 +50,7 @@ class InstallPackController extends Controller
             $asset = collect($assets)->first(
                 fn (array $item) =>
                     ($item['name'] ?? '') ===
-                    'mrpack4server-' . self::VERSION . '.jar'
+                    $filename
             );
 
             if (!$asset || !is_string($asset['browser_download_url'] ?? null)) {
@@ -85,6 +92,7 @@ class InstallPackController extends Controller
             'path' => $path,
             'size' => filesize($path),
             'first_bytes' => bin2hex(file_get_contents($path, false, null, 0, 8)),
+            'variant' => $variant,
         ]);
 
         return response()->streamDownload(

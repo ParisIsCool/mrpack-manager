@@ -1,19 +1,20 @@
 
 import { useState, type ChangeEvent, type FormEvent } from 'react';
-import { http, useCurrentServerRequired } from '@pterodactyl/sdk';
+import {
+    http,
+    httpErrorToHuman,
+    useCurrentServerRequired,
+} from '@pterodactyl/sdk';
 import axios from 'axios';
 import ImportModpackModal from '../components/ImportModpackModal';
 import ExploreModpacks from '../components/ExploreModpacks';
+import {
+    inspectMrpack,
+    type JavaCompatibility,
+    type LocalPackInfo,
+} from '../lib/inspectMrpack';
 
-type PackInfo = {
-    name: string;
-    versionId: string | null;
-    summary: string | null;
-    minecraft: string | null;
-    loaders: Record<string, string>;
-    fileCount: number;
-    overrides: string[];
-};
+type PackInfo = LocalPackInfo & { javaCompatibility: JavaCompatibility };
 
 async function uploadServerFile(
     serverId: string,
@@ -36,9 +37,24 @@ async function uploadServerFile(
     });
 }
 
-async function downloadLauncher(serverId: string): Promise<File> {
+async function startServer(serverId: string): Promise<void> {
+    await http.post(
+        `/api/client/servers/${serverId}/power`,
+        { signal: 'start' },
+    );
+}
+
+function openServerConsole(serverId: string): void {
+    window.location.href = `/server/${encodeURIComponent(serverId)}`;
+}
+
+async function downloadLauncher(
+    serverId: string,
+    serverJava: number | null,
+): Promise<File> {
+    const java = serverJava ?? 8;
     const response = await axios.get<Blob>(
-        `/api/client/servers/${serverId}/extensions/mrpack-manager/launcher`,
+        `/api/client/servers/${serverId}/extensions/mrpack-manager/launcher?java=${java}`,
         {
             responseType: 'blob',
             timeout: 10 * 60 * 1000,
@@ -130,34 +146,11 @@ export default function ServerScreen() {
         setPack(null);
         setInstallStatus(null);
 
-        const form = new FormData();
-        form.append('pack', file);
-
         try {
-            const response = await http.post<PackInfo>(
-                `/api/client/servers/${server.attributes.identifier}/extensions/mrpack-manager/inspect`,
-                form,
-                { timeout: 360000 },
-            );
-
-            setPack(response.data);
+            setPack(await inspectMrpack(file));
         } catch (err: unknown) {
-            console.error('Mrpack inspect failed:', err);
-            const message =
-                err instanceof Error
-                    ? `${err.message}${
-                        typeof err === 'object' &&
-                        err !== null &&
-                        'response' in err &&
-                        err.response &&
-                        typeof err.response === 'object' &&
-                        'status' in err.response
-                            ? ` (HTTP ${err.response.status})`
-                            : ''
-                    }`
-                    : String(err);
-
-            setError(message);
+            console.error('Local mrpack inspect failed:', err);
+            setError(err instanceof Error ? err.message : 'Could not inspect the selected pack.');
         } finally {
             setBusy(false);
         }
@@ -173,8 +166,13 @@ export default function ServerScreen() {
         setInstallStatus('Downloading launcher…');
         setError(null);
 
+        let filesUploaded = false;
+
         try {
-            const launcher = await downloadLauncher(serverId);
+            const launcher = await downloadLauncher(
+                serverId,
+                pack.javaCompatibility.server.java,
+            );
 
             setInstallStatus('Uploading mrpack4server.jar…');
             await uploadServerFile(
@@ -190,16 +188,31 @@ export default function ServerScreen() {
                 'local.mrpack',
             );
 
-            setInstallStatus(
-                'Both files uploaded successfully. Startup has not been changed.',
-            );
+            filesUploaded = true;
+            setInstallStatus('Starting server…');
+            await startServer(server.attributes.uuid ?? serverId);
+            setInstallStatus('Server started. Opening console…');
+            openServerConsole(serverId);
         } catch (err: unknown) {
-            console.error('Modrinth pack upload failed:', err);
+            const message = httpErrorToHuman(err);
+
+            console.error(
+                filesUploaded
+                    ? 'Modrinth pack installed but server start failed:'
+                    : 'Modrinth pack upload failed:',
+                err,
+            );
 
             setError(
-                'Upload failed. Check the launcher endpoint, server permissions, and panel logs. One file may already have uploaded; check the server files before retrying.',
+                filesUploaded
+                    ? `The modpack files were uploaded, but the server could not be started: ${message}`
+                    : `Upload failed: ${message} One file may already have uploaded; check the server files before retrying.`,
             );
-            setInstallStatus(null);
+            setInstallStatus(
+                filesUploaded
+                    ? 'Startup failed. The uploaded files were not removed.'
+                    : 'Installation failed.',
+            );
         } finally {
             setInstalling(false);
         }
@@ -214,8 +227,12 @@ export default function ServerScreen() {
             versionId,
             'local.mrpack',
         );
+        const packInfo = await inspectMrpack(packFile);
 
-        const launcherFile = await downloadLauncher(serverId);
+        const launcherFile = await downloadLauncher(
+            serverId,
+            packInfo.javaCompatibility.server.java,
+        );
 
         await uploadServerFile(
             serverId,
@@ -228,13 +245,17 @@ export default function ServerScreen() {
             packFile,
             'local.mrpack',
         );
+
+        setInstallStatus('Starting server…');
+        await startServer(server.attributes.uuid ?? serverId);
+        setInstallStatus('Server started. Opening console…');
+        openServerConsole(serverId);
     }
 
     return (
         <div className="mm:flex mm:flex-col mm:gap-6">
             <div>
             </div>
-
 
             <ExploreModpacks onInstall={installModrinthVersion} />
 
@@ -303,6 +324,25 @@ export default function ServerScreen() {
                                 </div>
                                 <div>
                                     <dt className="mm:text-sm mm:text-muted-foreground">
+                                        Server Java recommendation
+                                    </dt>
+                                    <dd>
+                                        {pack.javaCompatibility.server.java
+                                            ? `Java ${pack.javaCompatibility.server.java}`
+                                            : 'Unknown'}
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt className="mm:text-sm mm:text-muted-foreground">
+                                        Docker image
+                                    </dt>
+                                    <dd>
+                                        {pack.javaCompatibility.server.dockerImage ??
+                                            'No verified image offered by this egg'}
+                                    </dd>
+                                </div>
+                                <div>
+                                    <dt className="mm:text-sm mm:text-muted-foreground">
                                         Indexed files
                                     </dt>
                                     <dd>{pack.fileCount}</dd>
@@ -318,6 +358,17 @@ export default function ServerScreen() {
                                     </dd>
                                 </div>
                             </dl>
+
+                            <p className="mm:mt-4 mm:text-sm mm:text-muted-foreground">
+                                Compatibility status: {pack.javaCompatibility.status}.{' '}
+                                {pack.javaCompatibility.reason}
+                            </p>
+                            <p className="mm:mt-2 mm:text-sm mm:text-muted-foreground">
+                                The uploaded launcher ({pack.javaCompatibility.launcher.name})
+                                requires Java {pack.javaCompatibility.launcher.minimumJava}
+                                independently of the server recommendation. Docker image
+                                changes require confirmation and are not made by this import.
+                            </p>
 
                             <h4 className="mm:mt-4 mm:font-medium">
                                 Declared loaders

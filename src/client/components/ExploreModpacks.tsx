@@ -155,7 +155,11 @@ export default function ExploreModpacks({
     } catch (err) {
         console.error('Modrinth pack installation failed:', err);
         setVersionsError(
-            'Installation failed. Check the server files and try again.',
+            `Installation failed: ${
+                err instanceof Error
+                    ? err.message
+                    : 'Check the server files and try again.'
+            }`,
         );
     }
 }
@@ -237,7 +241,7 @@ export default function ExploreModpacks({
             )}
 
             {packs.length > 0 && (
-                <div className="mm:grid mm:grid-cols-1 mm:gap-4 sm:mm:grid-cols-2 xl:mm:grid-cols-3">
+                <div className="mm:grid mm:grid-cols-1 mm:gap-4 sm:mm:grid-cols-2 lg:mm:grid-cols-3">
                     {packs.map((pack) => (
                         <button
                             key={pack.project_id}
