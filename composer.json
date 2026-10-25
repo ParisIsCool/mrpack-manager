@@ -1,0 +1,11 @@
+{
+    "description": "Inspect Modrinth modpacks and prepare Minecraft server deployments.",
+    "autoload": {
+        "psr-4": {
+            "MrpackManager\\": "src/"
+        }
+    },
+    "config": {
+        "autoloader-suffix": "MrpackManagerExtension"
+    }
+}
